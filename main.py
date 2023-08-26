@@ -1,17 +1,33 @@
 from graphqlclient import GraphQLClient
 import json
 import tweepy
+import matplotlib.pyplot as plt
 from upsetFactor import getUpsetFactor
+from time import sleep
+from collections import Counter
+import numpy as np
 
-def get1v1Id(parsed):
-  for tourney in parsed:
-      if "B-Airs" in tourney['name']:
-          for event in tourney['events']:
-              if event['name'] == "SSBU - 1v1":
-                  return {"id": event['id'], "tourney": tourney['name']}
+# start.gg stuff
+authToken = ''
+apiVersion = ''
+client = GraphQLClient('https://api.start.gg/gql/' + apiVersion)
+client.inject_token('Bearer ' + authToken)
 
+# some helper functions
+def removeWhiteSpace(str_):
+  while " " in str_:
+    str_ = str_.replace(" ", "")
+  return str_
+
+def removeDuplicates(list_):
+  l = []
+  for obj in list_:
+    if obj not in l:
+      l.append(obj)
+  return l
 
 def checkUpset(set):
+    if set['displayScore'] == "DQ": return None
     players = []
 
     player1 = set['slots'][0]['entrant']
@@ -28,65 +44,68 @@ def checkUpset(set):
         loser = player1
     
     if winner['initialSeedNum'] > loser['initialSeedNum']:
+        
+        if player1['name'] == "C-" or player2['name'] == "C-": # lol
+           set['displayScore'] = set['displayScore'].replace("C-", "C minus")
+           
+        s = set['displayScore'].split("-")
+        gameCount = [s[0][-2], s[1][-1]]
+        gameCount.sort(reverse=True)
+        record = "-".join(gameCount)
+
         up = getUpsetFactor(winner['initialSeedNum'], loser['initialSeedNum'])
         parsedSet = {
             "upsetFactor": up,
             "round": set['fullRoundText'],
-            "info": f"In {set['fullRoundText']}, {winner['name']} (seed: {winner['initialSeedNum']}) beat {loser['name']} (seed: {loser['initialSeedNum']}) for an upset factor of {up}"
+            "info": f"In {set['fullRoundText']}, {winner['name']} (seed: {winner['initialSeedNum']}) beat {loser['name']} (seed: {loser['initialSeedNum']}) {record} for an upset factor of {up}"
         }
+
         return parsedSet
+    
+def getRecentBairs():
+   result = client.execute('''
+        query FindBairs($perPage: Int, $coordinates: String!, $radius: String!) {
+        tournaments(query: {
+            perPage: $perPage
+            filter: {
+            location: {
+                distanceFrom: $coordinates,
+                distance: $radius
+            }
+            past: true
+            }
+        }) {
+            nodes {
+            id
+            name
+            slug
+            events {
+                id
+                slug
+                name
+            }
+            }
+        }
+        }''',
+        {
+        "perPage": 2,
+        "coordinates": "40.179272,-75.105637",
+        "radius": "5mi"
+    })
+   
+   parsedResults = json.loads(result)['data']['tournaments']['nodes']
+   return parsedResults
 
+def getRecentSinglesUltBracketInfo():
+  tournaments = getRecentBairs()
+  for tourney in tournaments:
+    if "B-A" in tourney['name']:
+        for event in tourney['events']:
+            if event['name'] == "SSBU - 1v1":
+                return {"id": event['id'], "tourney": tourney['name'], "link": "start.gg/" + event['slug']}
 
-authToken = ''
-apiVersion = 'alpha'
-client = GraphQLClient('https://api.start.gg/gql/' + apiVersion)
-client.inject_token('Bearer ' + authToken)
-
-API_KEY = ""
-API_KEY_SECRET = ""
-ACCESS_TOKEN = ""
-ACCESS_TOKEN_SECRET = ""
-BEARER = ""
-CLIENT_ID = ""
-CLIENT_ID_SECRET = ""
-
-
-results = client.execute('''
-query FindBairs($perPage: Int, $coordinates: String!, $radius: String!) {
-  tournaments(query: {
-    perPage: $perPage
-    filter: {
-      location: {
-        distanceFrom: $coordinates,
-        distance: $radius
-      }
-    }
-  }) {
-    nodes {
-      id
-      name
-      slug
-      events {
-        id
-        slug
-        name
-      }
-    }
-  }
-}''',
-{
-  "perPage": 10,
-  "coordinates": "40.179272,-75.105637",
-  "radius": "5mi"
-})
-
-parsedResults = json.loads(results)['data']['tournaments']['nodes']
-
-Singles = get1v1Id(parsedResults)
-SinglesID = Singles['id']
-TourneyName = Singles['tourney']
-
-def getSetsFromEvent(ID, page):
+# main 'get' function
+def getSetsFromEvent(SinglesID, page):
   sets = client.execute('''
   query EventSets($eventId: ID!, $page: Int!, $perPage: Int!) {
     event(id: $eventId) {
@@ -104,6 +123,7 @@ def getSetsFromEvent(ID, page):
         nodes {
           fullRoundText
           winnerId
+          displayScore
           slots {
             entrant {
               id
@@ -118,40 +138,172 @@ def getSetsFromEvent(ID, page):
   {
     "eventId": SinglesID,
     "page": page,
-    "perPage": 20
+    "perPage": 5
   })
   return sets
 
-def makeThread(tweet):
-    parsedSets = json.loads(getSetsFromEvent(SinglesID, 1))
-    pages = parsedSets['data']['event']['sets']['pageInfo']['totalPages']
-    upsets = []
-
-    for page in range(pages):
-      sets = getSetsFromEvent(SinglesID, page)
-      parsedSets = json.loads(sets)
-      for set_ in parsedSets['data']['event']['sets']['nodes']:
-          checked = checkUpset(set_)
-          if checked:
-              upsets.append(checked)
-
+def getFinalUpsetList(upsets):
     def getUP(element):
         return element['upsetFactor']
-
+   
     final = []
     upsets.sort(reverse = True, key=getUP)
     for upset in upsets:
         final.append(upset['info'])
+
+    final = removeDuplicates(final)
+    return final
+
+def getTotalUpsetFactor(upsets):
+    totalUpsetFactor = 0
+    for s in upsets:
+       totalUpsetFactor += s['upsetFactor']
+    return totalUpsetFactor
+
+def getAllInfo():
+    upsets = []
+
+    info = getRecentSinglesUltBracketInfo()
+    singlesID = info['id']
+    parsedSets = json.loads(getSetsFromEvent(singlesID, 1))
+    pages = parsedSets['data']['event']['sets']['pageInfo']['totalPages']
+
+    for page in range(pages):
+      sets = getSetsFromEvent(singlesID, page)
+      parsedSets = json.loads(sets)
+      for set_ in parsedSets['data']['event']['sets']['nodes']:
+        checked = checkUpset(set_)
+        if checked:
+            upsets.append(checked)
+
+    finalUpsets = getFinalUpsetList(upsets)
+    totalUpsetFactor = getTotalUpsetFactor(upsets)
+    return {"upsets": finalUpsets, 
+            "totalUpsetFactor": totalUpsetFactor,
+            "link": info['link'],
+            "tourneyName": info['tourney']
+            }
+
+def makeThread():
+    info = getAllInfo()
+
+    # twitter stuff
+    API_KEY = ""
+    API_KEY_SECRET = ""
+    ACCESS_TOKEN = ""
+    ACCESS_TOKEN_SECRET = ""
+    BEARER = ""
+    CLIENT_ID = ""
+    CLIENT_ID_SECRET = ""
+
+    tclient=tweepy.Client(bearer_token=BEARER, consumer_key=API_KEY, consumer_secret=API_KEY_SECRET, access_token=ACCESS_TOKEN, access_token_secret=ACCESS_TOKEN_SECRET)
     
-    print(final)
+    upsets = info['upsets']   
+    totalUpsetFactor = info['totalUpsetFactor']
+    link = info['link']
+    tourneyName = info['tourneyName']
 
-    """
-    if tweet:
-      before = tclient.create_tweet(text=f"Upsets for {TourneyName}! If there are any errors, please let me know!")
-      for upset in final:
-         before = tclient.create_tweet(in_reply_to_tweet_id=before.data['id'], text=upset)
-  """
+    before = tclient.create_tweet(text=f"Upsets for {tourneyName}! Total upset factor was {totalUpsetFactor}! \n Link: {link}")
+    for upset in upsets:
+        before = tclient.create_tweet(in_reply_to_tweet_id=before.data['id'], text=upset)
 
-tclient=tweepy.Client(bearer_token=BEARER, consumer_key=API_KEY, consumer_secret=API_KEY_SECRET, access_token=ACCESS_TOKEN, access_token_secret=ACCESS_TOKEN_SECRET)
+# other stuff besides weekly thing
 
-makeThread(True)
+def getBairs(page):
+  tournamentsWithSSBU = client.execute(
+    '''
+    query TournamentsByVideogames($perPage: Int, $page: Int, $videogameIds: [ID], $coordinates: String, $radius: String){
+    tournaments(query: {
+      perPage: $perPage
+      page: $page
+      sortBy: "startAt desc"
+      filter: {
+        past: true
+        videogameIds: $videogameIds
+        location: {
+          distanceFrom: $coordinates,
+          distance: $radius
+        }
+      }
+    }) {
+    pageInfo {
+          total
+          totalPages
+        }
+      nodes {
+        events {
+          name
+          id
+        }
+        name
+        numAttendees
+      }
+    }
+  },''',
+    {
+    "perPage": 100,
+		"page": page,
+    "videogameIds": [1386],
+    "coordinates": "40.179272,-75.105637",
+    "radius": "5mi"
+  })
+
+  parsed = json.loads(tournamentsWithSSBU)
+  tournaments = parsed['data']['tournaments']['nodes']
+  pages = parsed['data']['tournaments']['pageInfo']['totalPages']
+  bairs = []
+  for tournament in tournaments:
+     if "b-a" in tournament['name'].lower() and "On-Line" not in tournament['name']:
+        bairs.append(tournament)
+  return {
+     "bairs": bairs,
+     "pages": pages
+  }
+
+def getAllBairs():
+  allBairs = []
+  bairs = getBairs(1)
+  pages = bairs['pages']
+  allBairs = allBairs + bairs['bairs']
+  i = 2
+  while(i < pages):
+    allBairs = allBairs + getBairs(i)['bairs'] 
+    i+= 1
+  return allBairs
+
+def getSinglesIDForEachBairs():
+  info = []
+  bairs = getAllBairs()
+  for bair in bairs:
+    events = bair['events']
+    for event in events:
+        if event['name'] == 'SSBU Singles' or event['name'] == 'Friday Bracket' or event['name'] == 'Singles - 1v1' or event['name'] == 'SSBU - 1v1':
+          info.append({"name": bair['name'], "id": event['id']})
+          break
+  return info
+
+def getAttendeesForEachBairs():
+  list_ = []
+  for bair in getAllBairs():
+    list_.append({"name": bair['name'], "attendees": bair['numAttendees']})
+  return list_
+
+def graphAttendeesForEachBairs():
+  data = getAttendeesForEachBairs()
+
+  x = []
+  y = []
+
+  for bairs in data:
+    x.append(bairs['name'])
+    y.append(bairs['attendees'])
+
+  plt.rcParams.update({'font.size': 3})
+
+  x = np.array(x)
+  y = np.array(y)
+
+  plt.barh(x, y)
+  plt.show()
+
+# makeThread()
