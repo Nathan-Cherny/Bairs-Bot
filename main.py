@@ -6,6 +6,7 @@ from upsetFactor import getUpsetFactor
 from time import sleep
 from collections import Counter
 import numpy as np
+import time
 
 # start.gg stuff
 authToken = ''
@@ -208,6 +209,7 @@ def makeThread():
         before = tclient.create_tweet(in_reply_to_tweet_id=before.data['id'], text=upset)
 
 # other stuff besides weekly thing
+# ---------------------------------------------------------------------------------
 
 def getBairs(page):
   tournamentsWithSSBU = client.execute(
@@ -234,14 +236,14 @@ def getBairs(page):
         events {
           name
           id
+          numEntrants
         }
         name
-        numAttendees
       }
     }
   },''',
     {
-    "perPage": 100,
+    "perPage": 50,
 		"page": page,
     "videogameIds": [1386],
     "coordinates": "40.179272,-75.105637",
@@ -266,26 +268,26 @@ def getAllBairs():
   pages = bairs['pages']
   allBairs = allBairs + bairs['bairs']
   i = 2
-  while(i < pages):
+  while(i <= pages):
     allBairs = allBairs + getBairs(i)['bairs'] 
     i+= 1
   return allBairs
 
-def getSinglesIDForEachBairs():
+def getSinglesEventForEachBairs():
   info = []
   bairs = getAllBairs()
   for bair in bairs:
     events = bair['events']
     for event in events:
         if event['name'] == 'SSBU Singles' or event['name'] == 'Friday Bracket' or event['name'] == 'Singles - 1v1' or event['name'] == 'SSBU - 1v1':
-          info.append({"name": bair['name'], "id": event['id']})
+          info.append({"name": bair['name'], "event": event})
           break
   return info
 
 def getAttendeesForEachBairs():
   list_ = []
-  for bair in getAllBairs():
-    list_.append({"name": bair['name'], "attendees": bair['numAttendees']})
+  for bair in getSinglesEventForEachBairs():
+    list_.append({"name": bair['name'], "attendees": bair['event']['numEntrants']})
   return list_
 
 def graphAttendeesForEachBairs():
@@ -305,5 +307,60 @@ def graphAttendeesForEachBairs():
 
   plt.barh(x, y)
   plt.show()
+
+def getWinnerOfEvent(eventID): # todo get id of people's user not the player because itd be different?
+   winner = client.execute('''
+      query EventStandings($eventId: ID!, $page: Int!, $perPage: Int!) {
+        event(id: $eventId) {
+          id
+          name
+          standings(query: {
+            perPage: $perPage,
+            page: $page
+          }){
+            nodes {
+              placement
+              entrant {
+                id
+                name
+              }
+            }
+          }
+        }
+      },''',
+      {
+        "eventId": eventID,
+        "page": 1,
+        "perPage": 1
+      }
+    )
+   winner = json.loads(winner)
+   return winner['data']['event']['standings']['nodes'][0]['entrant']['name']
+
+def dumpWinnersOfEachBairs(): # this takes quite a while because of rate limits
+  winners = {}
+  info = getSinglesEventForEachBairs()
+  i = 0
+  for bair in info:
+    i += 1
+    if i == 50:
+        time.sleep(61)
+        i = 0
+    id_ = bair['event']['id']
+    winner = getWinnerOfEvent(id_)
+    winners[bair['name']] = winner
+  
+  with open('winners.json', 'w') as file:
+     json.dumps(winners, file, indent=6)
+  
+  return winners
+
+def loadWinners():
+  with open('winners.json', 'r') as file:
+    winners = json.loads(file.read())
+
+  return winners
+
+dumpWinnersOfEachBairs()
 
 # makeThread()
