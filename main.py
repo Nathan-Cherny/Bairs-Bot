@@ -349,18 +349,47 @@ def dumpWinnersOfEachBairs(): # this takes quite a while because of rate limits
     id_ = bair['event']['id']
     winner = getWinnerOfEvent(id_)
     winners[bair['name']] = winner
+    print(winners)
   
   with open('winners.json', 'w') as file:
-     json.dumps(winners, file, indent=6)
+     json.dump(winners, file, indent=6)
   
   return winners
 
 def loadWinners():
   with open('winners.json', 'r') as file:
-    winners = json.loads(file.read())
+    winners = json.load(file)
 
   return winners
 
-dumpWinnersOfEachBairs()
+def getModeOfWinners():
+  w = loadWinners()
+  allWinners = list(w.values())
+  for i, winner in enumerate(allWinners):
+    if winner.split("|").__len__() > 1:
+      winner = winner.split("|")[1][1::]
+    allWinners[i] = winner
+  allWinners = Counter(allWinners)
+  return allWinners
+
+def makePieChartOfWinners():
+  winners = getModeOfWinners()
+
+  vals = []
+  winnerNames = []
+  
+  for key, value in dict(sorted(winners.items(), key=lambda item: item[1], reverse=False)).items():
+     vals.append(value)
+     winnerNames.append(key)
+
+  rects = plt.barh(winnerNames, vals)
+
+  for rect in rects:
+    plt.text(1 + rect.get_width(), rect.get_y()+0.5*rect.get_height(), # THANK YOU STACKOVERFLOW 🔥🔥🔥🔥
+                  '%d' % int(rect.get_width()),
+                  ha='center', va='center')
+
+  plt.show()
 
 # makeThread()
+
