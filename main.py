@@ -274,7 +274,8 @@ def getAllInfo():
 
 
 def makeThread():
-  info = getAllInfo()
+  # info = getAllInfo()
+  info = {'upsets': ['hey', 'woah']}
   CHANNEL_ID = "1533498455144792244"
 
   url = f"https://discord.com/api/v10/channels/{CHANNEL_ID}/messages"
@@ -296,7 +297,6 @@ def makeThread():
 
   return f"<p>Discord response: {response.status_code}</p>"
 
-makeThread()
 
 
 # other stuff besides weekly thing
