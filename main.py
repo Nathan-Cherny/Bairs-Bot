@@ -263,8 +263,7 @@ def getAllInfo():
 
 
 def makeThread():
-  # info = getAllInfo()
-  info = {'upsets': ['hey', 'woah']}
+  info = getAllInfo()
   CHANNEL_ID = "1533498455144792244"
 
   url = f"https://discord.com/api/v10/channels/{CHANNEL_ID}/messages"
