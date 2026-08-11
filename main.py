@@ -1,6 +1,5 @@
 from graphqlclient import GraphQLClient
 import json
-import tweepy
 import requests
 import matplotlib.pyplot as plt
 from upsetFactor import getUpsetFactor
@@ -9,7 +8,6 @@ from collections import Counter
 import numpy as np
 from dotenv import load_dotenv
 import time
-from selenium import webdriver
 import os
 
 load_dotenv()
@@ -230,15 +228,6 @@ def getHTML(upsets):
   """
   with open("upsets.html", "w") as file:
     file.write(HTML)
-
-  driver = webdriver.Chrome()
-
-  htmlPath = os.getcwd() + "\\upsets.html"
-  htmlPath = "file:///" + htmlPath.replace("\\", "/")
-
-  driver.get(htmlPath)
-  driver.save_screenshot("html.png")
-  driver.quit()
 
 def getAllInfo():
     upsets = []
